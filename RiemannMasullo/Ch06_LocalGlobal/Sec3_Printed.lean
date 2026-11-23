@@ -295,6 +295,91 @@ def Printed.globalPrincipalValueConverse_normTwist_printedResidues : Prop :=
             printedEuler(χ, S, -1 + shift(t)) * mass(F) *
               adeleSchwartzFourier f (zeroAdele(F)))
 
+/-- Removing one finite place cancels the trivial character's Euler factor at zero. -/
+private theorem Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_euler
+    (v : Places(ℚ)) : E((1 : PontryaginDual C𝔽(ℚ)), {v}) 0 = 0 := by
+  let χ : PontryaginDual C𝔽(ℚ) := 1
+  have hres (u : (v.adicCompletion ℚ)ˣ) : (twist(χ, 0)).restrict v u = 1 := by
+    rw [HeckeCharacter.restrict, MulChar.ofUnitHom_coe]
+    change (1 : ℂ) * _ ^ (0 : ℂ) = 1
+    simp
+  have hunr := HeckeCharacter.isUnramifiedAt_iff.mpr
+    (fun u ↦ hres (Units.map (v.adicCompletionIntegers ℚ).subtype.toMonoidHom u))
+  have hval : (twist(χ, 0)).localValue v = 1 := by
+    obtain ⟨π, hπ⟩ :=
+      (Valued.v (R := v.adicCompletion ℚ)).exists_isUniformizer_of_isCyclic_of_nontrivial
+    rw [hunr.localValue_eq π hπ]
+    exact hres (Units.mk0 π hπ.ne_zero)
+  rw [reciprocalPartialHeckeEulerProduct_singleton _ v hunr, hval]
+  simp
+
+open Topology in
+/-- Agreement after translation on a half-plane identifies the residues at translated centers. -/
+private theorem Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_continuation
+    (M G : ℂ → ℂ) (a : ℂ) (hM : Meromorphic M) (hG : MeromorphicOn G univ)
+    (h : ∀ z : ℂ, 1 < z.re → M (z + a) = G z) (ρ : ℂ) :
+    complexResidue M (ρ + a) = complexResidue G ρ := by
+  let T := fun z ↦ M (z + a)
+  have hT : MeromorphicOn T univ := fun z _ ↦
+    meromorphicAt_comp_add_const_iff_meromorphicAt.mpr (hM (z + a))
+  have ht : meromorphicOrderAt (T - G) 2 = ⊤ := by
+    apply meromorphicOrderAt_eq_top_iff.mpr
+    have hn : ∀ᶠ z : ℂ in 𝓝 (2 : ℂ), 1 < z.re :=
+      (isOpen_lt continuous_const Complex.continuous_re).mem_nhds (by norm_num)
+    exact (hn.filter_mono nhdsWithin_le_nhds).mono fun z hz ↦ sub_eq_zero.mpr (h z hz)
+  have he : T =ᶠ[𝓝[≠] ρ] G :=
+    (meromorphicOrderAt_eq_top_iff.mp ((hT.sub hG).meromorphicOrderAt_eq_top_of_isPreconnected
+      isPreconnected_univ (mem_univ (2 : ℂ)) (mem_univ ρ) ht)).mono fun _ hz ↦ sub_eq_zero.mp hz
+  obtain ⟨R, hR, hball⟩ := Metric.nhdsWithin_basis_ball.eventually_iff.mp he
+  unfold complexResidue Filter.limUnder
+  apply congrArg Filter.lim
+  apply Filter.map_congr
+  filter_upwards [Ioo_mem_nhdsGT hR] with r hr
+  congr 1
+  calc circleIntegral M (ρ + a) r = circleIntegral T ρ r := by
+         simp only [circleIntegral, deriv_circleMap, T, circleMap, add_right_comm ρ a]
+       _ = circleIntegral G ρ r := by
+         apply circleIntegral.integral_congr hr.1.le
+         intro z hz
+         have hd := Metric.mem_sphere.mp hz
+         refine hball ⟨Metric.mem_ball.mpr (hd.trans_lt hr.2), ?_⟩
+         rintro rfl
+         exact hr.1.ne (by simpa using hd)
+
+/-- A purely imaginary power of the idele class norm defines a unitary character. -/
+private theorem Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_character
+    (t : ℝ) : ∃ χ : PontryaginDual C𝔽(ℚ), twist(χ, 0) = twist(1, shift(t)) := by
+  let c := twist((1 : PontryaginDual C𝔽(ℚ)), shift(t))
+  have hn (g : C𝔽(ℚ)) : ‖c g‖ = 1 := by
+    change ‖(1 : ℂ) * (((ideleClassNorm ℚ g : NNReal) : ℝ) : ℂ) ^ shift(t)‖ = 1
+    rw [one_mul, Complex.norm_cpow_eq_rpow_re_of_pos (NNReal.coe_pos.mpr (Units.zero_lt _))]
+    simp
+  let χ : PontryaginDual C𝔽(ℚ) :=
+    { toFun := fun g ↦ ⟨c g, mem_sphere_zero_iff_norm.mpr (hn g)⟩
+      map_one' := Subtype.ext (map_one c)
+      map_mul' := fun x y ↦ Subtype.ext (map_mul c x y)
+      continuous_toFun := c.continuous.subtype_mk _ }
+  refine ⟨χ, ?_⟩
+  ext1 g
+  change c g * _ ^ (0 : ℂ) = c g
+  simp
+
+/-- On the half-plane of convergence a scalar can be absorbed into the test function. -/
+private theorem Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_smul
+    (f : ℬ(ℚ)) (c s : ℂ) (hs : 1 < s.re) :
+    Z(c • f, (1 : PontryaginDual C𝔽(ℚ))) s = c * Z(f, (1 : PontryaginDual C𝔽(ℚ))) s := by
+  have hm : 1 < quasiCharacterAbscissa (ideleClassNorm ℚ) (isProperMap_ideleClassNorm ℚ)
+      (ideleClassNorm_ne_one (F := ℚ)) (twist((1 : PontryaginDual C𝔽(ℚ)), s)) := by
+    rwa [quasiCharacterAbscissa_ideleClassNormTwist]
+  dsimp only
+  rw [globalIdelicZFunction_eq_integral (c • f) hm, globalIdelicZFunction_eq_integral f hm]
+  unfold globalIdelicZetaIntegral
+  rw [← integral_const_mul]
+  apply integral_congr_ae
+  filter_upwards with g
+  change (c * _) * _ = c * (_ * _)
+  ring
+
 /-- Paper: Theorem 6.3.2.2(2), (6.3.2.22)–(6.3.2.26), p. 310. Take ℚ, remove 2, and
 set t₀ = π/log 2 in the pure norm twist. Use (1-2πx²) exp(-πx²) at infinity and the integer
 indicators at finite places. Its polar values are (1,0), and the rational class mass is 1.
@@ -302,7 +387,76 @@ The printed Euler factors are 2 and 3/2, so the printed pair is (-2,0). The full
 continuation has Euler factors 0 and 1/2 at the two shifted poles and hence residue pair
 (0,0). Injectivity of the terminal isomorphism gives the contradiction. -/
 theorem Printed.globalPrincipalValueConverse_normTwist_printedResidues_false :
-    ¬ Printed.globalPrincipalValueConverse_normTwist_printedResidues := by sorry
+    ¬ Printed.globalPrincipalValueConverse_normTwist_printedResidues := by
+  classical
+  intro h
+  obtain ⟨m, hm⟩ := Ideal.exists_maximal (𝓞 ℚ)
+  let v : Places(ℚ) := ⟨m, hm.isPrime, NeZero.ne m⟩
+  let q := v.asIdeal.absNorm
+  have hq : 1 < q := HeightOneSpectrum.one_lt_absNorm v
+  let t := Real.pi / Real.log q
+  have hphase : (q : ℂ) ^ shift(t) = -1 := by
+    have hq0 : (q : ℂ) ≠ 0 := by exact_mod_cast (zero_lt_one.trans hq).ne'
+    have hlog : ((Real.log q : ℝ) : ℂ) ≠ 0 :=
+      Complex.ofReal_ne_zero.mpr (Real.log_pos (by exact_mod_cast hq)).ne'
+    rw [Complex.cpow_def_of_ne_zero hq0, ← Complex.natCast_log]
+    convert Complex.exp_pi_mul_I using 2
+    dsimp [t]
+    rw [Complex.ofReal_div]
+    field_simp
+  obtain ⟨χ, hχ⟩ := Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_character t
+  have hp : printedEuler(χ, {v}, shift(t)) ≠ 0 := by
+    by_cases hu : (twist(χ, 0)).IsUnramifiedAt v
+    · rw [Finset.filter_singleton, ite_eq_left hu, Finset.prod_singleton]
+      change 1 - (q : ℂ) ^ shift(t) ≠ 0
+      rw [hphase]
+      norm_num
+    · simp [Finset.filter_singleton, hu]
+  -- Choose a test with signed polar coordinates (1, 0) before removing the place.
+  obtain ⟨R, hR, _, hop, _⟩ := globalConverse_normTwist_exact (F := ℚ)
+  obtain ⟨x, hx⟩ := hop.surjective ((1, 0) : ℂ × ℂ)
+  let K := LinearMap.ker (homogeneousAdelicThetaLinearMap ℚ 1)
+  obtain ⟨f, rfl⟩ := K.mkQ_surjective x
+  have hf := (hR f).symm.trans hx
+  obtain ⟨A, hA⟩ := h ℚ χ t hχ {v}
+  obtain ⟨M, hM, hInt, hpair⟩ := hA f
+  let P := adelePrincipalValue ℚ {v}
+  -- Undo the twist and absorb the normalization of the full Mellin integral into the test.
+  let G := Z(P (mass(ℚ) • f), (1 : PontryaginDual C𝔽(ℚ)))
+  have heq (z : ℂ) (hz : 1 < z.re) : M (z + -shift(t)) = G z := by
+    let w := z + -shift(t)
+    have hw : 1 < w.re := by simpa [w] using hz
+    have htw : twist(χ, w) = twist((1 : PontryaginDual C𝔽(ℚ)), z) := by
+      simpa [w, add_comm, add_left_comm, add_assoc] using ideleClassNormTwist_add_of_eq hχ w
+    calc M w = _ := hInt w hw
+         _ = mass(ℚ) * Z(P f, χ) w := (homogeneousTheta_classMellin_eq_mass_mul χ (P f) ⟨w, hw⟩).2
+         _ = G z := by
+           dsimp only [G]
+           rw [htw, map_smul]
+           exact (Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_smul (P f) _ z hz).symm
+  have hres := globalPrincipalValueConverse_normTwist_residues {v} (1 : PontryaginDual C𝔽(ℚ))
+    0 (by simp) (mass(ℚ) • f)
+  have hscaled := hR (mass(ℚ) • f)
+  rw [map_smul, map_smul, hx] at hscaled
+  have hsnd := congrArg Prod.snd hscaled.symm
+  change mass(ℚ) * adeleSchwartzFourier (mass(ℚ) • f) (zeroAdele(ℚ)) = mass(ℚ) * 0 at hsnd
+  rw [mul_zero] at hsnd
+  have hzero : (complexResidue G 0, complexResidue G 1) = 0 := by
+    change (complexResidue G 0, complexResidue G 1) = ((0, 0) : ℂ × ℂ)
+    simpa only [G, P, Complex.ofReal_zero, zero_mul, neg_zero, sub_zero,
+      Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_euler v, hsnd, mul_zero] using hres
+  have hcont := Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_continuation
+    M G (-shift(t)) hM (globalIdelicZFunction_meromorphic _ _).meromorphicOn heq
+  rw [← zero_add (-shift(t)), hcont 0, sub_eq_add_neg, hcont 1, hzero] at hpair
+  have hkill := A.injective (hpair.symm.trans A.map_zero.symm)
+  have hfst := congrArg Prod.fst hkill
+  change -printedEuler(χ, {v}, shift(t)) * mass(ℚ) * f (zeroAdele(ℚ)) = 0 at hfst
+  have hf₁ := congrArg Prod.fst hf
+  change -mass(ℚ) * f (zeroAdele(ℚ)) = 1 at hf₁
+  apply hp
+  calc printedEuler(χ, {v}, shift(t))
+      = printedEuler(χ, {v}, shift(t)) * (-mass(ℚ) * f (zeroAdele(ℚ))) := by rw [hf₁, mul_one]
+    _ = 0 := by linear_combination hfst
 
 /-- Paper: Theorem 6.3.2.2(2), (6.3.2.21), (6.3.2.24)–(26), p. 310. As printed: in
 Mellin coordinates the ordinary residue pair is onto ℂ² and its kernel is the image of the
@@ -326,6 +480,19 @@ value there is zero. The removed transform has two zero residues and takes value
 at zero. If a polar-free test had the same removed transform, cancelling the Euler factor
 would equate its entire transform with the original transform having residue -1 at zero. -/
 theorem Printed.globalPrincipalValueConverse_normTwist_ordinaryResidues_exact_false :
-    ¬ Printed.globalPrincipalValueConverse_normTwist_ordinaryResidues_exact := by sorry
+    ¬ Printed.globalPrincipalValueConverse_normTwist_ordinaryResidues_exact := by
+  intro h
+  obtain ⟨m, hm⟩ := Ideal.exists_maximal (𝓞 ℚ)
+  let v : Places(ℚ) := ⟨m, hm.isPrime, NeZero.ne m⟩
+  let χ : PontryaginDual C𝔽(ℚ) := 1
+  have heuler : E(χ, {v}) 0 = 0 :=
+    Printed.globalPrincipalValueConverse_normTwist_printedResidues_false_euler v
+  have hχ : twist(χ, 0) = twist((1 : PontryaginDual C𝔽(ℚ)), shift(0)) := by simp [χ]
+  obtain ⟨f, hf⟩ := (h ℚ χ 0 hχ {v}).1 ((1, 0) : ℂ × ℂ)
+  have hr := globalPrincipalValueConverse_normTwist_residues {v} χ 0 hχ f
+  have hf₁ := congrArg Prod.fst hf
+  have hr₁ := congrArg Prod.fst hr
+  simp only [Complex.ofReal_zero, zero_mul, neg_zero, heuler] at hf₁ hr₁
+  exact zero_ne_one (hr₁.symm.trans hf₁)
 
 end RiemannMasullo
