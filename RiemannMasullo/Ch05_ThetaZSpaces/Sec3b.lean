@@ -2284,6 +2284,279 @@ theorem sLocalIdelicZFunction_entire_iff_theta_exponentialDecay (χ : Pontryagin
       (⇑(thetaAt(χ₁(χ)) f) : Jₛ → ℂ) ∈ modulatedExponentialDecaySubmodule
         ⟨mₛ, (isProperMap_sIdeleQuotientNorm F S).continuous⟩ univ := by sorry
 
+/-- Mellin integration turns a compact unit average followed by dilation into the
+average of the character times the scalar dilation. -/
+private theorem sLocalIdelicZFunction_principalValue_average {G : Type*} [CommGroup G]
+    [TopologicalSpace G] [IsTopologicalGroup G] [SecondCountableTopology G]
+    [MeasurableSpace G] [BorelSpace G] (μ : Measure G) [μ.IsMulLeftInvariant] [SFinite μ]
+    (U : Subgroup G) (π : G) (f : G → ℂ) (hf : Continuous f) (c : G →ₜ* ℂ)
+    (hfc : Integrable (fun x ↦ f x * c x) μ) (hc : IntegrableOn c U μ) :
+    (∫ x, (f x - (μ.real U : ℂ)⁻¹ *
+      ∫ u in U, f (u⁻¹ * (π⁻¹ * x)) ∂μ) * c x ∂μ) =
+      (1 - (μ.real U : ℂ)⁻¹ * (∫ u in U, c u ∂μ) * c π) *
+        ∫ x, f x * c x ∂μ := by
+  let b (u x : G) := f (u⁻¹ * (π⁻¹ * x)) * c x
+  let h (x : G) := f x * c x
+  have hb (u x : G) : b u x = (c u * c π) * h ((π * u)⁻¹ * x) := by
+    have hx : x = (π * u) * ((π * u)⁻¹ * x) := by group
+    unfold b h
+    rw [← mul_assoc, ← mul_inv_rev, congrArg c hx, map_mul, map_mul]
+    ring
+  have hcont : Continuous (Function.uncurry b) := by
+    unfold Function.uncurry b
+    fun_prop
+  have hnorm (u : G) : (∫ x, ‖h ((π * u)⁻¹ * x)‖ ∂μ) = ∫ x, ‖h x‖ ∂μ :=
+    integral_mul_left_eq_self (μ := μ) (fun x ↦ ‖h x‖) _
+  have hh : Integrable h μ := hfc
+  have hi : Integrable (Function.uncurry b) ((μ.restrict U).prod μ) := by
+    refine (integrable_prod_iff hcont.aestronglyMeasurable).mpr ⟨.of_forall fun u ↦ ?_, ?_⟩
+    · simpa only [Function.uncurry_apply_pair, Function.comp_apply, hb] using
+        ((measurePreserving_mul_left μ (π * u)⁻¹).integrable_comp_of_integrable hh).const_mul (c u * c π)
+    · simp only [Function.uncurry_apply_pair, hb, norm_mul, integral_const_mul, hnorm]
+      exact (hc.norm.mul_const _).mul_const _
+  have hsub (x : G) : (f x - (μ.real U : ℂ)⁻¹ * ∫ u in U, f (u⁻¹ * (π⁻¹ * x)) ∂μ) * c x =
+      h x - (μ.real U : ℂ)⁻¹ * ∫ u in U, b u x ∂μ := by
+    rw [sub_mul, mul_assoc, ← integral_mul_const]
+  simp_rw [hsub]
+  have hbi : Integrable (fun x ↦ ∫ u in U, b u x ∂μ) μ := hi.integral_prod_right
+  rw [integral_sub hh (hbi.const_mul _), integral_const_mul,
+    ← integral_integral_swap hi]
+  simp_rw [hb, integral_const_mul, integral_mul_left_eq_self, integral_mul_const]
+  ring
+
+/-- The integral of a character over the integer units is zero unless the character
+is trivial there. -/
+private theorem sLocalIdelicZFunction_principalValue_units {G : Type*} [CommGroup G]
+    [MeasurableSpace G] [MeasurableMul G] [TopologicalSpace G]
+    (μ : Measure G) [μ.IsMulLeftInvariant] (U : Subgroup G) (hU : MeasurableSet (U : Set G))
+    (c : G →ₜ* ℂ) :
+    (∫ u in U, c u ∂μ) = if ∀ u ∈ U, c u = 1 then (μ.real U : ℂ) else 0 := by
+  classical
+  split_ifs with h
+  · rw [setIntegral_congr_fun hU h, setIntegral_const, Complex.real_smul, mul_one]
+  · obtain ⟨a, ha, hne⟩ := not_forall.mp h |>.imp fun a h ↦ not_imp.mp h
+    have he : (fun x : G ↦ a * x) ⁻¹' (U : Set G) = U := by
+      ext x
+      exact U.mul_mem_cancel_left ha
+    have hv := (measurePreserving_mul_left μ a).setIntegral_preimage_emb
+      (MeasurableEquiv.mulLeft a).measurableEmbedding (fun u ↦ c u) (U : Set G)
+    rw [he] at hv
+    simp only [map_mul, integral_const_mul] at hv
+    exact (mul_eq_zero.mp (show (c a - 1) * (∫ u in U, c u ∂μ) = 0 by linear_combination hv)).resolve_left
+      (sub_ne_zero.mpr hne)
+
+/-- Restricting the global norm chart to a finite component gives the local norm chart. -/
+private theorem sLocalIdelicZFunction_principalValue_chart (χ : PontryaginDual Jₛ) (v : S) :
+    ∃ η : PontryaginDual (v.val.adicCompletion F)ˣ, ∀ z, sLocalFiniteRestriction v (chartₛ(χ) z) =
+      quasiCharacterNormTwist _ (continuous_finiteLocalModule v.val) ((circleToComplex).comp η) z := by
+  let h := sLocalFiniteInsertion_properties v
+  let i : (v.val.adicCompletion F)ˣ →ₜ* Jₛ :=
+    ⟨{ toFun := fun g ↦ QuotientGroup.mk ((ContinuousMulEquiv.prodUnits (InfiniteAdeleRing F)
+          ((v : S) → v.val.adicCompletion F)).symm (1, ContinuousMulEquiv.piUnits.symm
+            (@Pi.mulSingle _ _ _ (Classical.decEq _) v g))),
+       map_one' := h.1, map_mul' := h.2.1 }, h.2.2⟩
+  refine ⟨χ.comp i, fun z ↦ ContinuousMonoidHom.ext fun g ↦ ?_⟩
+  have hn := sLocalFiniteRestriction_norm v g
+  change ((1 : PontryaginDual Jₛ) (i g) : ℂ) *
+    (((mₛ (i g) : ℝ≥0) : ℝ) : ℂ) ^ (1 : ℂ) = _ at hn
+  simp only [PontryaginDual.one_apply, Circle.coe_one, one_mul, Complex.cpow_one] at hn
+  exact congrArg (fun t : ℂ ↦ (χ (i g) : ℂ) * t ^ z) hn
+
+/-- The local principal value multiplies the zeta integral by the inverse Euler factor. -/
+private theorem sLocalIdelicZFunction_principalValue_finite (v : S) (f : ℬ(v.val.adicCompletion F))
+    (χ : PontryaginDual Jₛ) (z : ℂ) (hz : 0 < z.re) :
+    letI : MeasurableSpace (v.val.adicCompletion F)ˣ := borel _
+    let c := sLocalFiniteRestriction v (chartₛ(χ) z)
+    let μ := finiteLocalMultiplicativeTamagawaMeasure F v.val
+    localIdelicZetaIntegral μ (fun x ↦ finitePlacePrincipalValue v.val f (Multiplicative.ofAdd x)) c =
+      localIdelicZetaIntegral μ (fun x ↦ f (Multiplicative.ofAdd x)) c / finiteLocalEulerFactor v.val c := by
+  let : MeasurableSpace (v.val.adicCompletion F)ˣ := borel _
+  intro c μ
+  let K := v.val.adicCompletion F
+  let O := v.val.adicCompletionIntegers F
+  let : ProperSpace K := properSpace_adicCompletion v.val
+  let : SecondCountableTopology Kˣ := (Units.isEmbedding_val₀ (G₀ := K)).secondCountableTopology
+  let : BorelSpace Kˣ := ⟨rfl⟩
+  let : μ.IsHaarMeasure := finiteLocalMultiplicativeTamagawaMeasure_isHaarMeasure v.val
+  let hp := (Valued.v : Valuation K (WithZero (Multiplicative ℤ))).exists_isUniformizer_of_isCyclic_of_nontrivial
+  let π : Kˣ := Units.mk0 (hp.choose : K) hp.choose_spec.ne_zero
+  let h (u : Kˣ) := f (Multiplicative.ofAdd u.val)
+  have hcont : Continuous h := (schwartzBruhat_continuous f).comp (continuous_ofAdd.comp Units.continuous_val)
+  obtain ⟨η, hη⟩ := sLocalIdelicZFunction_principalValue_chart χ v
+  have hf : Integrable (fun u ↦ h u * c u) μ := by
+    dsimp only [c]
+    rw [hη]
+    exact finiteLocalIdelicZetaIntegral_integrable v.val f η hz
+  have hK : IsCompact (O.units : Set Kˣ) := Submonoid.units_isCompact
+    (isCompact_iff_compactSpace.mpr (compactSpace_adicCompletionIntegers v.val))
+  have hO : IsOpen (O.units : Set Kˣ) := Submonoid.isOpen_units (Valued.isOpen_valuationSubring _)
+  have hm : (μ.real O.units : ℂ) ≠ 0 := Complex.ofReal_ne_zero.mpr
+    (finitePlacePrincipalValue_integrable v.val π f (Multiplicative.ofAdd 0)).1.ne'
+  have hram : (∀ u : Oˣ, c (Units.map O.subtype.toMonoidHom u) = 1) ↔ ∀ u ∈ O.units, c u = 1 := by
+    constructor
+    · intro H u hu
+      let t : Oˣ := ⟨⟨u.val, hu.1⟩, ⟨u.inv, hu.2⟩, Subtype.ext u.val_inv, Subtype.ext u.inv_val⟩
+      exact H t
+    · intro H u
+      exact H _ ⟨u.val.property, u.inv.property⟩
+  let avg (x : Kˣ) := ∫ u in O.units, h (u⁻¹ * (π⁻¹ * x)) ∂μ
+  have hev (x : Kˣ) : finitePlacePrincipalValue v.val f (Multiplicative.ofAdd x.val) =
+      h x - (μ.real O.units : ℂ)⁻¹ * avg x :=
+    finitePlacePrincipalValue_spec v.val π hp.choose_spec f _
+  have hI := sLocalIdelicZFunction_principalValue_average μ O.units π h hcont c hf
+    (c.continuous.continuousOn.integrableOn_compact hK)
+  let Z := ∫ x, h x * c x ∂μ
+  have hF : 1 - (μ.real O.units : ℂ)⁻¹ * (∫ u in O.units, c u ∂μ) * c π =
+      (finiteLocalEulerFactor v.val c)⁻¹ := by
+    rw [sLocalIdelicZFunction_principalValue_units μ O.units hO.measurableSet c]
+    unfold finiteLocalEulerFactor
+    rw [hram]
+    split_ifs <;> simp only [inv_inv, inv_mul_cancel₀ hm, one_mul, mul_zero, zero_mul, sub_zero, inv_one]
+    rfl
+  calc
+    _ = ∫ x, (h x - (μ.real O.units : ℂ)⁻¹ * avg x) * c x ∂μ :=
+      integral_congr_ae (.of_forall fun x ↦ congrArg (· * c x) (hev x))
+    _ = (1 - (μ.real O.units : ℂ)⁻¹ * (∫ u in O.units, c u ∂μ) * c π) * Z := hI
+    _ = _ := (congrArg (· * Z) hF).trans (mul_comm _ _)
+
+/-- The product of finitely many local tests belongs to the Schwartz–Bruhat space
+of the product group. -/
+private theorem sLocalIdelicZFunction_principalValue_productTest {ι : Type*} [Fintype ι] (G : ι → Type*)
+    [∀ i, CommGroup (G i)] [∀ i, TopologicalSpace (G i)] [∀ i, IsTopologicalGroup (G i)]
+    [∀ i, T2Space (G i)] [∀ i, LocallyCompactSpace (G i)] [∀ i, SecondCountableTopology (G i)]
+    (f : ∀ i, SchwartzBruhat (G i)) : ∃ g : SchwartzBruhat (∀ i, G i),
+      ∀ x, g x = ∏ i, f i (x i) := by
+  classical
+  cases isEmpty_or_nonempty ι with
+  | inl _ =>
+    let : CompactSpace (∀ i, G i) := Finite.compactSpace
+    obtain ⟨g, hg⟩ := compact_schwartzBruhat_one (H := (i : ι) → G i)
+    exact ⟨g, fun x ↦ (hg x).trans (by simp)⟩
+  | inr hi =>
+    obtain ⟨i⟩ := hi
+    let J := {j : ι // j ≠ i}
+    obtain ⟨g, hg⟩ := sLocalIdelicZFunction_principalValue_productTest (ι := J) (fun j ↦ G j.val) (fun j ↦ f j.val)
+    let e : ((j : ι) → G j) ≃ₜ* (G i × ((j : J) → G j.val)) :=
+      { Homeomorph.piSplitAt i G with map_mul' := fun _ _ ↦ rfl }
+    obtain ⟨t, ht⟩ := schwartzBruhat_kernel_equiv (G := G i) (H := (j : J) → G j.val)
+    let q := t (UniformSpace.Completion.coe' (α := InductiveTensor (SchwartzBruhat (G i))
+      (SchwartzBruhat ((j : J) → G j.val))) ((f i) ⊗ₜ[ℂ] g))
+    refine ⟨⟨q.val ∘ e, schwartzBruhat_pullback_mem e q⟩, fun x ↦ ?_⟩
+    change q (x i, fun j ↦ x j.val) = _
+    rw [show q (x i, fun j ↦ x j.val) = _ from ht (f i) g _ _, hg, Fintype.prod_eq_mul_prod_compl i]
+    exact congrArg (_ * ·) (Finset.prod_subtype _ (fun j ↦ by simp) (fun j ↦ f j (x j))).symm
+termination_by Fintype.card ι
+decreasing_by
+  classical
+  exact Fintype.card_subtype_lt (x := i) (not_not_intro rfl)
+
+/-- Assemble the archimedean product in the test space of the infinite adeles. -/
+private theorem sLocalIdelicZFunction_principalValue_archTest
+    (a : (w : InfinitePlace F) → ℬ(w.Completion)) :
+    ∃ arch : ℬ(A∞), ∀ x : A∞, arch (Multiplicative.ofAdd x) =
+      ∏ w : InfinitePlace F, a w (Multiplicative.ofAdd (x w)) := by
+  let G (w : InfinitePlace F) := Multiplicative w.Completion
+  let (w : InfinitePlace F) : T2Space (G w) := (inferInstance : T2Space w.Completion)
+  let (w : InfinitePlace F) : LocallyCompactSpace (G w) := (inferInstance : LocallyCompactSpace w.Completion)
+  let (w : InfinitePlace F) : SecondCountableTopology (G w) :=
+    (InfinitePlace.Completion.isometry_extensionEmbedding w).isEmbedding.secondCountableTopology
+  obtain ⟨a₀, ha⟩ := sLocalIdelicZFunction_principalValue_productTest G a
+  let e : Multiplicative (InfiniteAdeleRing F) ≃ₜ* ((w : InfinitePlace F) → G w) :=
+    { toFun := fun x w ↦ Multiplicative.ofAdd (x.toAdd w)
+      invFun := fun x ↦ Multiplicative.ofAdd (fun w ↦ (x w).toAdd)
+      left_inv := fun _ ↦ rfl
+      right_inv := fun _ ↦ rfl
+      map_mul' := fun _ _ ↦ rfl
+      continuous_toFun := continuous_id
+      continuous_invFun := continuous_id }
+  exact ⟨⟨a₀.val ∘ e, schwartzBruhat_pullback_mem e a₀⟩, fun x ↦ ha (e (Multiplicative.ofAdd x))⟩
+
+/-- Tate's product formula and the tensor action of principal value give the identity on pure tests. -/
+private theorem sLocalIdelicZFunction_principalValue_pure (T : Finset V) (hT : T ⊆ S)
+    (χ : PontryaginDual Jₛ) (z : ℂ) (hz : 0 < z.re) (f : ℬₛ)
+    (a : (w : InfinitePlace F) → ℬ(w.Completion)) (b : (v : S) → ℬ(v.val.adicCompletion F))
+    (hf : ∀ x : Aₛ, f (Multiplicative.ofAdd x) =
+      (∏ w : InfinitePlace F, a w (Multiplicative.ofAdd (x.1 w))) *
+        ∏ v : S, b v (Multiplicative.ofAdd (x.2 v))) :
+    let c := chartₛ(χ) z
+    sLocalIdelicZetaIntegral (sAdelePrincipalValue F hT f) c = sLocalIdelicZetaIntegral f c /
+      ∏ v : S, if v.val ∈ T then finiteLocalEulerFactor v.val (sLocalFiniteRestriction v c) else 1 := by
+  classical
+  intro c
+  let (v : S) : MeasurableSpace (v.val.adicCompletion F)ˣ := borel _
+  obtain ⟨a₀, ha⟩ := sLocalIdelicZFunction_principalValue_archTest a
+  let e := (sAdeleSchwartz_inductiveTensor_equiv F S).choose
+  let b' (v : S) := if v.val ∈ T then finitePlacePrincipalValue v.val (b v) else b v
+  have hpack : f = e (a₀ ⊗ₜ[ℂ] (⨂ₜ[ℂ] v, b v)) := by
+    apply Subtype.ext
+    funext x
+    exact (hf x.toAdd).trans (((sAdeleSchwartz_inductiveTensor_equiv F S).choose_spec a₀ b x.toAdd).trans
+      (congrArg (· * _) (ha x.toAdd.1))).symm
+  have hpv (x : Aₛ) : sAdelePrincipalValue F hT f (Multiplicative.ofAdd x) =
+      (∏ w : InfinitePlace F, a w (Multiplicative.ofAdd (x.1 w))) *
+        ∏ v : S, b' v (Multiplicative.ofAdd (x.2 v)) := by
+    rw [hpack, sAdelePrincipalValue_tmul hT a₀ b]
+    exact ((sAdeleSchwartz_inductiveTensor_equiv F S).choose_spec a₀ b' x).trans
+      (congrArg (· * _) (ha x.1))
+  rw [sLocalIdelicZetaIntegral_pureTensor c ⟨χ, z, hz, rfl⟩ _ a b' hpv,
+    sLocalIdelicZetaIntegral_pureTensor c ⟨χ, z, hz, rfl⟩ f a b hf, mul_div_assoc]
+  apply congrArg (_ * ·)
+  rw [← Finset.prod_div_distrib]
+  apply Finset.prod_congr rfl
+  intro v _
+  by_cases hv : v.val ∈ T
+  · simp only [b', hv, ite_true]
+    exact sLocalIdelicZFunction_principalValue_finite v (b v) χ z hz
+  · simp only [b', hv, ite_false, div_one]
+
+/-- The reciprocal of a finite Euler factor is entire along a norm chart. -/
+private theorem sLocalIdelicZFunction_principalValue_analytic (χ : PontryaginDual Jₛ) (v : S) (t : ℂ) :
+    AnalyticAt ℂ (fun z ↦ (finiteLocalEulerFactor v.val (sLocalFiniteRestriction v (chartₛ(χ) z)))⁻¹) t := by
+  obtain ⟨η, hη⟩ := sLocalIdelicZFunction_principalValue_chart χ v
+  let K := v.val.adicCompletion F
+  let O := v.val.adicCompletionIntegers F
+  let c := quasiCharacterNormTwist _ (continuous_finiteLocalModule v.val) ((circleToComplex).comp η)
+  have hu (u : Oˣ) (z : ℂ) : c z (Units.map O.subtype.toMonoidHom u) =
+      (η (Units.map O.subtype.toMonoidHom u) : ℂ) := by
+    let g := Units.map O.subtype.toMonoidHom u
+    have hmem : g ∈ O.units := ⟨u.val.property, u.inv.property⟩
+    have hnorm := Valued.toNormedField.norm_eq_one_iff.mpr
+      (HeightOneSpectrum.adicCompletionIntegers.mem_units_iff_valued_eq_one.mp hmem)
+    change (η g : ℂ) * (‖g.val‖ : ℂ) ^ z = (η g : ℂ)
+    simp [hnorm]
+  let hp := (Valued.v : Valuation K (WithZero (Multiplicative ℤ))).exists_isUniformizer_of_isCyclic_of_nontrivial
+  let π : Kˣ := Units.mk0 (hp.choose : K) hp.choose_spec.ne_zero
+  have hc (z : ℂ) : (finiteLocalEulerFactor v.val (sLocalFiniteRestriction v (chartₛ(χ) z)))⁻¹ =
+      if ∀ u : Oˣ, (η (Units.map O.subtype.toMonoidHom u) : ℂ) = 1 then 1 - c z π else 1 := by
+    rw [hη]
+    change (finiteLocalEulerFactor v.val (c z))⁻¹ = _
+    have H : (∀ u : Oˣ, c z (Units.map O.subtype.toMonoidHom u) = 1) ↔
+        ∀ u : Oˣ, (η (Units.map O.subtype.toMonoidHom u) : ℂ) = 1 :=
+      forall_congr' fun u ↦ by rw [hu u z]
+    rw [finiteLocalEulerFactor, H]
+    split_ifs <;> simp only [inv_inv, inv_one]
+    rfl
+  simp_rw [hc]
+  split_ifs
+  · have hn : (‖π.val‖ : ℂ) ≠ 0 := Complex.ofReal_ne_zero.mpr (norm_ne_zero_iff.mpr π.ne_zero)
+    exact analyticAt_const.sub (analyticAt_const.mul ((differentiable_id.const_cpow (Or.inl hn)).analyticAt t))
+  · exact analyticAt_const
+
+/-- Equality on the positive half-plane continues to equality away from a discrete set. -/
+private theorem sLocalIdelicZFunction_principalValue_continue {f g : ℂ → ℂ}
+    (hf : MeromorphicOn f univ) (hg : MeromorphicOn g univ) (h : ∀ z : ℂ, 0 < z.re → f z = g z) :
+    f =ᶠ[codiscrete ℂ] g := by
+  have ho : meromorphicOrderAt (f - g) (1 : ℂ) = ⊤ := by
+    apply meromorphicOrderAt_eq_top_iff.mpr
+    have hn : ∀ᶠ z : ℂ in 𝓝 (1 : ℂ), 0 < z.re :=
+      (isOpen_lt continuous_const Complex.continuous_re).mem_nhds (by norm_num)
+    exact (hn.filter_mono nhdsWithin_le_nhds).mono fun z hz ↦ sub_eq_zero.mpr (h z hz)
+  apply eventuallyEq_codiscrete_iff_forall_eventuallyEq_nhdsNE.mpr
+  intro z
+  have hz := (hf.sub hg).meromorphicOrderAt_eq_top_of_isPreconnected isPreconnected_univ
+    (mem_univ (1 : ℂ)) (mem_univ z) ho
+  exact (meromorphicOrderAt_eq_top_iff.mp hz).mono fun _ he ↦ sub_eq_zero.mp he
+
 /-- Paper: Proposition 5.3.4.5(1), p. 264.
 Applying the principal value at selected finite places divides the zeta function
 by their Euler factors as a meromorphic identity. -/
@@ -2294,7 +2567,49 @@ theorem sLocalIdelicZFunction_principalValue (T : Finset V) (hT : T ⊆ S)
       sLocalIdelicZFunction (sAdelePrincipalValue F hT f) c =
         sLocalIdelicZFunction f c /
           ∏ v : S, if v.val ∈ T then finiteLocalEulerFactor v.val (sLocalFiniteRestriction v c)
-            else 1 := by sorry
+            else 1 := by
+  classical
+  let d (z : ℂ) := ∏ v : S, if v.val ∈ T then
+    (finiteLocalEulerFactor v.val (sLocalFiniteRestriction v (chartₛ(χ) z)))⁻¹ else 1
+  have hd (z : ℂ) : d z = (∏ v : S, if v.val ∈ T then
+      finiteLocalEulerFactor v.val (sLocalFiniteRestriction v (chartₛ(χ) z)) else 1)⁻¹ := by
+    rw [← Finset.prod_inv_distrib]
+    apply Finset.prod_congr rfl
+    intro v _
+    split_ifs <;> simp only [inv_one]
+  have ha (z : ℂ) : AnalyticAt ℂ d z := by
+    dsimp only [d]
+    apply Finset.analyticAt_fun_prod
+    intro v _
+    by_cases h : v.val ∈ T
+    · simpa only [h, ite_true] using sLocalIdelicZFunction_principalValue_analytic χ v z
+    · simp only [h, ite_false]
+      exact analyticAt_const
+  let P : ℬₛ →L[ℂ] ℬₛ := ⟨sAdelePrincipalValue F hT, (sAdelePrincipalValue_isClosedEmbedding hT).continuous⟩
+  have hright (z : ℂ) (hz : 0 < z.re) : sLocalIdelicZetaIntegral (P f) (chartₛ(χ) z) =
+      sLocalIdelicZetaIntegral f (chartₛ(χ) z) * d z := by
+    let c := chartₛ(χ) z
+    obtain ⟨L, hL⟩ := sLocalIdelicZetaIntegral_tempered c ⟨χ, z, hz, rfl⟩
+    let Λ := L.comp P - d z • L + L
+    have he := sLocalIdelicZetaIntegral_eq_of_pureTensor c ⟨χ, z, hz, rfl⟩ Λ (fun g a b hg ↦ by
+      change L (P g) - d z * L g + L g = _
+      have hpure : sLocalIdelicZetaIntegral (P g) c = sLocalIdelicZetaIntegral g c * d z := by
+        rw [hd, ← div_eq_mul_inv]
+        exact sLocalIdelicZFunction_principalValue_pure T hT χ z hz g a b hg
+      rw [hL, hL, hpure]
+      ring) f
+    change L (P f) - d z * L f + L f = _ at he
+    rw [← hL f] at he
+    rw [← hL, ← hL]
+    linear_combination he
+  have hmer := sLocalIdelicZFunction_principalValue_continue
+    (sLocalIdelicZFunction_meromorphic (P f) χ).meromorphicOn
+    ((sLocalIdelicZFunction_meromorphic f χ).meromorphicOn.mul (fun z _ ↦ (ha z).meromorphicAt))
+    (fun z hz ↦ (sLocalIdelicZFunction_eq_integral (P f) ⟨χ, z, hz, rfl⟩).trans
+      ((hright z hz).trans (congrArg (· * d z) (sLocalIdelicZFunction_eq_integral f ⟨χ, z, hz, rfl⟩).symm)))
+  filter_upwards [hmer] with z hz
+  change sLocalIdelicZFunction (P f) (chartₛ(χ) z) = sLocalIdelicZFunction f (chartₛ(χ) z) * d z at hz
+  exact hz.trans (by rw [div_eq_mul_inv, hd])
 
 -- TODO(paper-gap): (5.3.4.14) gives the allowed pole multiplicity, which can exceed
 -- the actual order. A local gamma factor contributes a positive multiplicity at a pole.
@@ -2565,6 +2880,143 @@ theorem sLocalIdelicZFunction_principalValue_pole_bound (f : ℬₛ)
       meromorphicOrderAt (fun z ↦ sLocalIdelicZFunction
         (sAdelePrincipalValue F (Finset.Subset.refl S) f) (chartₛ(χ) z)) s := by sorry
 
+/-- Extend the inverse unit character by zero as an additive Schwartz–Bruhat test. -/
+private theorem exists_sLocalIdelicZFunction_principalValue_attaining_poles_units (v : V)
+    (c : QuasiCharacter (v.adicCompletion F)ˣ) :
+    let U := (v.adicCompletionIntegers F).units
+    ∃ b : ℬ(v.adicCompletion F), b (Multiplicative.ofAdd 0) = 0 ∧ ∀ g : (v.adicCompletion F)ˣ,
+      b (Multiplicative.ofAdd g.val) = if g ∈ U then (c g)⁻¹ else 0 := by
+  classical
+  intro U
+  let K := v.adicCompletion F
+  have h0 : (0 : K) ∉ Units.val '' (U : Set Kˣ) := fun ⟨g, _, hg⟩ ↦ g.ne_zero hg
+  have hmem (g : Kˣ) : g.val ∈ Units.val '' (U : Set Kˣ) ↔ g ∈ U :=
+    ⟨fun ⟨u, hu, he⟩ ↦ (Units.ext he : u = g) ▸ hu, fun hg ↦ ⟨g, hg, rfl⟩⟩
+  by_cases h : ∀ g ∈ U, c g = 1
+  · let hp := (Valued.v : Valuation K (WithZero (Multiplicative ℤ))).exists_isUniformizer_of_isCyclic_of_nontrivial
+    let π : Kˣ := Units.mk0 (hp.choose : K) hp.choose_spec.ne_zero
+    refine ⟨finitePlaceDifference v π (finiteStandardGaussian v 1), ?_, fun g ↦ ?_⟩
+    · exact (finitePlaceDifference_integerIndicator v π hp.choose_spec 0).trans (indicator_of_notMem h0 _)
+    · rw [finitePlaceDifference_integerIndicator v π hp.choose_spec]
+      by_cases hg : g ∈ U
+      · rw [indicator_of_mem ((hmem g).mpr hg), ite_eq_left hg, h g hg, inv_one]
+      · rw [indicator_of_notMem (mt (hmem g).mp hg), ite_eq_right hg]
+  · refine ⟨finiteStandardGaussian v c, ?_, fun g ↦ ?_⟩
+    · change finiteStandardGaussianValue v c 0 = 0
+      rw [finiteStandardGaussianValue, ite_eq_right h, indicator_of_notMem h0]
+    · by_cases hg : g ∈ U
+      · exact (finiteStandardGaussian_integerUnit v c g hg).trans (ite_eq_left hg).symm
+      · rw [ite_eq_right hg]
+        change finiteStandardGaussianValue v c g.val = 0
+        rw [finiteStandardGaussianValue, ite_eq_right h, indicator_of_notMem (mt (hmem g).mp hg)]
+
+/-- A preimage of the inverse unit character contributes the positive unit mass at every exponent. -/
+private theorem exists_sLocalIdelicZFunction_principalValue_attaining_poles_finite
+    (χ : PontryaginDual Jₛ) (v : S) :
+    letI : MeasurableSpace (v.val.adicCompletion F)ˣ := borel _
+    let μ := finiteLocalMultiplicativeTamagawaMeasure F v.val
+    let U := (v.val.adicCompletionIntegers F).units
+    ∃ b : ℬ(v.val.adicCompletion F), (μ.real U : ℂ) ≠ 0 ∧ ∀ z : ℂ,
+      localIdelicZetaIntegral μ (fun x ↦ finitePlacePrincipalValue v.val b (Multiplicative.ofAdd x))
+        (sLocalFiniteRestriction v (chartₛ(χ) z)) = μ.real U := by
+  classical
+  let : MeasurableSpace (v.val.adicCompletion F)ˣ := borel _
+  intro μ U
+  let : BorelSpace (v.val.adicCompletion F)ˣ := ⟨rfl⟩
+  obtain ⟨η, hη⟩ := sLocalIdelicZFunction_principalValue_chart χ v
+  let c₀ := (circleToComplex).comp η
+  obtain ⟨b₀, h0, hb₀⟩ := exists_sLocalIdelicZFunction_principalValue_attaining_poles_units v.val c₀
+  obtain ⟨b, hb⟩ : b₀ ∈ Set.range (finitePlacePrincipalValue v.val) := by
+    rw [finitePlacePrincipalValue_range]
+    exact h0
+  refine ⟨b, Complex.ofReal_ne_zero.mpr
+    (finitePlacePrincipalValue_integrable v.val 1 b (Multiplicative.ofAdd 0)).1.ne', fun z ↦ ?_⟩
+  let hO : IsOpen (U : Set (v.val.adicCompletion F)ˣ) := Submonoid.isOpen_units (Valued.isOpen_valuationSubring _)
+  rw [hb, hη]
+  let c := quasiCharacterNormTwist _ (continuous_finiteLocalModule v.val) c₀ z
+  have hh (g : (v.val.adicCompletion F)ˣ) : b₀ (Multiplicative.ofAdd g.val) * c g =
+      (U : Set (v.val.adicCompletion F)ˣ).indicator (fun _ ↦ (1 : ℂ)) g := by
+    rw [hb₀]
+    by_cases hg : g ∈ U
+    · rw [ite_eq_left hg, indicator_of_mem hg]
+      have hn := Valued.toNormedField.norm_eq_one_iff.mpr
+        (HeightOneSpectrum.adicCompletionIntegers.mem_units_iff_valued_eq_one.mp hg)
+      change (η g : ℂ)⁻¹ * ((η g : ℂ) * (‖g.val‖ : ℂ) ^ z) = 1
+      simp [hn, Circle.coe_ne_zero]
+    · rw [ite_eq_right hg, indicator_of_notMem hg, zero_mul]
+  change (∫ g, b₀ (Multiplicative.ofAdd g.val) * c g ∂μ) = _
+  simp_rw [hh]
+  rw [integral_indicator_const _ hO.measurableSet, Complex.real_smul, mul_one]
+
+/-- The local standard Gaussian realizes the archimedean Euler factor on the entire positive half-plane. -/
+private theorem exists_sLocalIdelicZFunction_principalValue_attaining_poles_arch
+    (χ : PontryaginDual Jₛ) (w : InfinitePlace F) :
+    letI : MeasurableSpace w.Completion := borel _
+    ∃ a : ℬ(w.Completion), ∀ z : ℂ, 0 < z.re →
+      localIdelicZetaIntegral (infiniteLocalMultiplicativeTamagawaMeasure F w)
+        (fun x ↦ a (Multiplicative.ofAdd x)) (sLocalInfiniteRestriction w (chartₛ(χ) z)) =
+        infiniteLocalEulerFactor w (sLocalInfiniteRestriction w (chartₛ(χ) z)) := by
+  let : MeasurableSpace w.Completion := borel _
+  let h := sLocalInfiniteInsertion_properties (S := S) w
+  let i : w.Completionˣ →ₜ* Jₛ :=
+    ⟨{ toFun := fun g ↦ QuotientGroup.mk ((ContinuousMulEquiv.prodUnits (InfiniteAdeleRing F)
+          ((v : S) → v.val.adicCompletion F)).symm (ContinuousMulEquiv.piUnits.symm
+            (@Pi.mulSingle _ _ _ (Classical.decEq _) w g), 1)),
+       map_one' := h.1, map_mul' := h.2.1 }, h.2.2⟩
+  let η := χ.comp i
+  refine ⟨infiniteStandardGaussian w η, fun z hz ↦ ?_⟩
+  have hchart : sLocalInfiniteRestriction w (chartₛ(χ) z) =
+      quasiCharacterNormTwist _ (continuous_infiniteLocalModule w) ((circleToComplex).comp η) z := by
+    ext1 g
+    have hn := sLocalInfiniteRestriction_norm w (S := S) g
+    change ((1 : PontryaginDual Jₛ) (i g) : ℂ) * (((mₛ (i g) : ℝ≥0) : ℝ) : ℂ) ^ (1 : ℂ) = _ at hn
+    simp only [PontryaginDual.one_apply, Circle.coe_one, one_mul, Complex.cpow_one] at hn
+    exact congrArg (fun t : ℂ ↦ (χ (i g) : ℂ) * t ^ z) hn
+  rw [hchart, ← infiniteLocalIdelicZFunction_eq_integral w _ η hz]
+  exact infiniteLocalIdelicZFunction_standardGaussian w η z hz
+
+/-- A function with an entire reciprocal which is nonzero somewhere has meromorphic order at most zero. -/
+private theorem exists_sLocalIdelicZFunction_principalValue_attaining_poles_reciprocal (f : ℂ → ℂ)
+    (ha : Differentiable ℂ (fun z ↦ (f z)⁻¹)) (u : ℂ) (hu : f u ≠ 0) (s : ℂ) :
+    MeromorphicAt f s ∧ meromorphicOrderAt f s ≤ 0 := by
+  let g (z : ℂ) := (f z)⁻¹
+  have hm : MeromorphicOn g univ := fun z _ ↦ (ha.analyticAt z).meromorphicAt
+  have h₀ : meromorphicOrderAt g u = 0 :=
+    (ha.analyticAt u).meromorphicNFAt.meromorphicOrderAt_eq_zero_iff.mpr (inv_ne_zero hu)
+  have hfin := hm.meromorphicOrderAt_ne_top_of_isPreconnected isPreconnected_univ
+    (mem_univ u) (mem_univ s) (by rw [h₀]; exact WithTop.coe_ne_top)
+  have hf : (fun z ↦ (g z)⁻¹) = f := funext fun z ↦ inv_inv _
+  refine ⟨hf ▸ (hm s (mem_univ s)).inv, ?_⟩
+  rw [← hf]
+  change meromorphicOrderAt g⁻¹ s ≤ 0
+  rw [meromorphicOrderAt_inv]
+  have hn : 0 ≤ meromorphicOrderAt g s := (ha.analyticAt s).meromorphicOrderAt_nonneg
+  obtain ⟨k, hk⟩ := WithTop.ne_top_iff_exists.mp hfin
+  rw [← hk] at hn ⊢
+  exact_mod_cast neg_nonpos.mpr (show 0 ≤ k by exact_mod_cast hn)
+
+/-- Shifted real and complex Gamma factors have no zeros. Their orders therefore equal their negative parts. -/
+private theorem exists_sLocalIdelicZFunction_principalValue_attaining_poles_order
+    (χ : PontryaginDual Jₛ) (w : InfinitePlace F) (s : ℂ) :
+    let L := fun z ↦ infiniteLocalEulerFactor w (sLocalInfiniteRestriction w (chartₛ(χ) z))
+    MeromorphicAt L s ∧ meromorphicOrderAt L s ≤ 0 := by
+  intro L
+  by_cases hw : w.IsReal
+  · obtain ⟨b, hb⟩ := infiniteLocalEulerFactor_chart_real χ w hw
+    have h : L = fun z ↦ Complex.Gammaℝ (z + b) := funext hb
+    rw [h]
+    apply exists_sLocalIdelicZFunction_principalValue_attaining_poles_reciprocal _
+      (Complex.differentiable_Gammaℝ_inv.comp (differentiable_id.add_const b)) (1 - b)
+    simp [Complex.Gammaℝ_one]
+  · obtain ⟨b, hb⟩ := infiniteLocalEulerFactor_chart_complex χ w
+      (InfinitePlace.not_isReal_iff_isComplex.mp hw)
+    have h : L = fun z ↦ Complex.Gammaℂ (z + b) / 2 := funext hb
+    rw [h]
+    refine exists_sLocalIdelicZFunction_principalValue_attaining_poles_reciprocal _ ?_ (1 - b) ?_ s
+    · simp only [div_eq_mul_inv, mul_inv_rev, inv_inv]
+      exact (Complex.differentiable_Gammaℂ_inv.comp (differentiable_id.add_const b)).const_mul 2
+    · simp [Complex.Gammaℂ_one, Real.pi_ne_zero]
+
 /-- Paper: Proposition 5.3.4.5(2), p. 264.
 On each component a choice of test realizes the full allowed archimedean pole divisor.
 Deviation: Attainment is an existence assertion. The input can cancel any allowed pole. -/
@@ -2572,7 +3024,47 @@ theorem exists_sLocalIdelicZFunction_principalValue_attaining_poles (χ : Pontry
     ∃ f : ℬₛ, ∀ s : ℂ,
       meromorphicOrderAt (fun z ↦ sLocalIdelicZFunction
         (sAdelePrincipalValue F (Finset.Subset.refl S) f) (chartₛ(χ) z)) s =
-        (↑(-(sLocalArchimedeanPoleMultiplicity χ s : ℤ)) : WithTop ℤ) := by sorry
+        (↑(-(sLocalArchimedeanPoleMultiplicity χ s : ℤ)) : WithTop ℤ) := by
+  classical
+  let (w : InfinitePlace F) : MeasurableSpace w.Completion := borel _
+  let (v : S) : MeasurableSpace (v.val.adicCompletion F)ˣ := borel _
+  choose a ha using exists_sLocalIdelicZFunction_principalValue_attaining_poles_arch χ
+  choose b hmass hb using exists_sLocalIdelicZFunction_principalValue_attaining_poles_finite χ
+  obtain ⟨a₀, ha₀⟩ := sLocalIdelicZFunction_principalValue_archTest a
+  let e := (sAdeleSchwartz_inductiveTensor_equiv F S).choose
+  let f := e (a₀ ⊗ₜ[ℂ] (⨂ₜ[ℂ] v, b v))
+  let p := sAdelePrincipalValue F (Finset.Subset.refl S) f
+  let b' (v : S) := finitePlacePrincipalValue v.val (b v)
+  have hp (x : Aₛ) : p (Multiplicative.ofAdd x) =
+      (∏ w : InfinitePlace F, a w (Multiplicative.ofAdd (x.1 w))) *
+        ∏ v : S, b' v (Multiplicative.ofAdd (x.2 v)) := by
+    have H : p = e (a₀ ⊗ₜ[ℂ] (⨂ₜ[ℂ] v, b' v)) := by
+      simpa only [p, f, e, b', Finset.coe_mem, ite_true] using
+        sAdelePrincipalValue_tmul (F := F) (Finset.Subset.refl S) a₀ b
+    rw [H]
+    exact ((sAdeleSchwartz_inductiveTensor_equiv F S).choose_spec a₀ b' x).trans
+      (congrArg (· * _) (ha₀ x.1))
+  let L (w : InfinitePlace F) (z : ℂ) := infiniteLocalEulerFactor w (sLocalInfiniteRestriction w (chartₛ(χ) z))
+  let M := ∏ v : S, (((finiteLocalMultiplicativeTamagawaMeasure F v.val).real
+    (v.val.adicCompletionIntegers F).units : ℝ) : ℂ)
+  have hM : M ≠ 0 := Finset.prod_ne_zero_iff.mpr fun v _ ↦ hmass v
+  have hL (w : InfinitePlace F) (z : ℂ) : MeromorphicAt (L w) z ∧ meromorphicOrderAt (L w) z ≤ 0 :=
+    exists_sLocalIdelicZFunction_principalValue_attaining_poles_order χ w z
+  have hmer (z : ℂ) : MeromorphicAt (fun t ↦ M * ∏ w, L w t) z :=
+    MeromorphicAt.mul analyticAt_const.meromorphicAt (MeromorphicAt.fun_prod fun w _ ↦ (hL w z).1)
+  have H := sLocalIdelicZFunction_principalValue_continue (sLocalIdelicZFunction_meromorphic p χ).meromorphicOn
+    (fun z _ ↦ hmer z) (fun z hz ↦ by
+      rw [sLocalIdelicZFunction_eq_integral p ⟨χ, z, hz, rfl⟩,
+        sLocalIdelicZetaIntegral_pureTensor (chartₛ(χ) z) ⟨χ, z, hz, rfl⟩ p a b' hp]
+      exact (congrArg₂ (· * ·) (Finset.prod_congr rfl fun w _ ↦ ha w z hz)
+        (Finset.prod_congr rfl fun v _ ↦ hb v z)).trans (mul_comm _ _))
+  refine ⟨f, fun s ↦ ?_⟩
+  have hs := meromorphicOrderAt_congr (H.filter_mono (nhdsNE_le_codiscrete s))
+  refine hs.trans ?_
+  change meromorphicOrderAt ((fun _ : ℂ ↦ M) * (fun z ↦ ∏ w, L w z)) s = _
+  rw [meromorphicOrderAt_mul_of_ne_zero analyticAt_const hM,
+    meromorphicOrderAt_fun_prod (fun w _ ↦ (hL w s).1), sLocalArchimedeanPoleMultiplicity_eq_sum]
+  exact Finset.sum_congr rfl fun w _ ↦ (min_eq_right (hL w s).2).symm
 
 private theorem continuous_schwartzBruhat_pointEval {G : Type*} [CommGroup G]
     [TopologicalSpace G] (x : G) : Continuous (fun f : SchwartzBruhat G ↦ f x) := by
